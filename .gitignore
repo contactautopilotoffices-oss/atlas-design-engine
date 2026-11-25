@@ -2,6 +2,7 @@
 node_modules/
 .pnp
 .pnp.js
+.yarn/install-state.gz
 
 # Testing and coverage
 coverage/
@@ -12,6 +13,8 @@ dist/
 build/
 out/
 .next/
+*.tsbuildinfo
+next-env.d.ts
 
 # Environment variables and secrets
 .env
@@ -19,7 +22,15 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+.env*.local
 *.pem
+
+# ATLAS local data: store.json, uploaded presentations, extracted and generated images
+.atlas-design/
+data/
+
+# Vercel
+.vercel
 
 # Editor and OS files
 .DS_Store

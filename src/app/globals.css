@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces Variable", "Iowan Old Style", Georgia, serif;
+
+  --color-paper: #f7f4ef;
+  --color-canvas: #fbfaf7;
+  --color-stone-50: #f3efe8;
+  --color-stone-100: #e9e3d9;
+  --color-stone-200: #d9d1c3;
+  --color-stone-400: #a89d8b;
+  --color-stone-600: #6e6556;
+  --color-ink: #1d1b18;
+  --color-ink-soft: #3b3731;
+  --color-bronze: #8a6a45;
+  --color-bronze-dark: #6b5034;
+  --color-live: #2f7a5b;
+  --color-live-soft: #e3f0ea;
+  --color-planned: #c77a1e;
+  --color-planned-soft: #fbefdf;
+  --color-danger: #a33a2c;
+  --color-danger-soft: #f7e4e0;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: #e6d6bf;
+}
+
+/* Planned / not-live elements are drawn with an orange dashed outline, matching the architecture diagram. */
+.planned-outline {
+  border: 1.5px dashed var(--color-planned);
+}
+.live-outline {
+  border: 1.5px solid var(--color-live);
+}
+
+.fade-in {
+  animation: fade-in 220ms ease-out both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+}
