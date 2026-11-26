@@ -14,6 +14,7 @@ export interface Repository {
   list<C extends CollectionName>(c: C, where?: Partial<RecordOf<C>>): Promise<RecordOf<C>[]>;
   get<C extends CollectionName>(c: C, id: string): Promise<RecordOf<C> | null>;
   insert<C extends CollectionName>(c: C, rec: RecordOf<C>): Promise<RecordOf<C>>;
+  insertMany?<C extends CollectionName>(c: C, recs: RecordOf<C>[]): Promise<RecordOf<C>[]>;
   update<C extends CollectionName>(c: C, id: string, patch: Partial<RecordOf<C>>): Promise<RecordOf<C>>;
   remove<C extends CollectionName>(c: C, id: string): Promise<void>;
   /** Monotonic counter, e.g. for REF-00001 codes. */

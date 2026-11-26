@@ -10,6 +10,8 @@ import { env } from "@/modules/core/env";
 import type { FloorPlan, FloorPlanRoom, Property, RoomType } from "@/modules/core/schemas";
 import { AppError, newId, notFound, now } from "@/modules/core/util";
 import { suggestRoomType } from "@/modules/intelligence/suggest";
+import { cancelFloorPlanPreviewJob, startFloorPlanPreviewJob } from "@/modules/generation/orchestrator";
+import { openaiStatus } from "@/modules/openai/config";
 import { blobs, repo } from "@/modules/persistence";
 import { readPlanImage } from "./claude";
 import { readDxf } from "./dxf";
@@ -155,6 +157,7 @@ export async function importPlan(input: {
       source: { kind, fileName: input.fileName.slice(0, 200), page: null },
       background: null,
       scale: { method: d.unitsKnown ? "drawing" : "ai_estimate", metresPerPixel: null, note: d.unitsNote },
+      previews: [],
       createdAt: t,
       updatedAt: t,
     };
@@ -181,6 +184,7 @@ export async function importPlan(input: {
       source: { kind, fileName: input.fileName.slice(0, 200), page: pic.page },
       background: { key: `${id}/plan.png`, pixelWidth: pic.full.width, pixelHeight: pic.full.height },
       scale: r.scale,
+      previews: [],
       createdAt: t,
       updatedAt: t,
     };
@@ -252,7 +256,7 @@ export async function updatePlan(
   });
 }
 
-export async function publishPlan(id: string, publish: boolean, actor: string) {
+export async function publishPlan(id: string, publish: boolean, actor: string, opts: { autoPreview?: boolean } = {}) {
   const plan = await repo().get("floorPlans", id);
   if (!plan) throw notFound("Floor plan");
   if (publish) {
@@ -261,6 +265,11 @@ export async function publishPlan(id: string, publish: boolean, actor: string) {
   }
   const updated = await repo().update("floorPlans", id, { status: publish ? "published" : "draft", updatedAt: now() });
   await audit(publish ? "floorplan.publish" : "floorplan.unpublish", actor, "floorPlan", id);
+  if (publish && !plan.isSample && (opts.autoPreview ?? true) && openaiStatus().configured) {
+    await startFloorPlanPreviewJob(id, { kind: "staff", role: "admin", label: actor, openDevAccess: true }).catch(() => undefined);
+  } else if (!publish) {
+    await cancelFloorPlanPreviewJob(id, { kind: "staff", role: "admin", label: actor, openDevAccess: true }).catch(() => undefined);
+  }
   return updated;
 }
 

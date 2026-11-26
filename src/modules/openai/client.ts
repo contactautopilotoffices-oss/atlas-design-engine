@@ -17,6 +17,7 @@ export type OpenAIImageRequest = {
   size?: string;
   quality?: string;
   outputFormat?: "png" | "jpeg" | "webp";
+  signal?: AbortSignal;
 };
 
 export type OpenAIImageResponse = {
@@ -46,10 +47,11 @@ export class OpenAIClient {
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
 
-  private async request(path: string, buildInit: () => RequestInit, maxAttempts = 3): Promise<OpenAIImageResponse> {
+  private async request(path: string, buildInit: () => RequestInit, signal?: AbortSignal, maxAttempts = 3): Promise<OpenAIImageResponse> {
     const url = `${this.base.replace(/\/$/, "")}${path}`;
     let attempt = 0;
     for (;;) {
+      if (signal?.aborted) throw new OpenAIError("Generation cancelled.", 499, false);
       attempt++;
       let res: Response;
       try {
@@ -57,8 +59,13 @@ export class OpenAIClient {
         const headers = new Headers(init.headers);
         headers.set("Authorization", `Bearer ${this.apiKey}`);
         headers.set("Accept", "application/json");
-        res = await this.fetchImpl(url, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(115_000) });
+        const timeout = AbortSignal.timeout(115_000);
+        const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        res = await this.fetchImpl(url, { ...init, headers, signal: combined });
       } catch (e) {
+        if (signal?.aborted || (e instanceof Error && e.name === "AbortError")) {
+          throw new OpenAIError("Generation cancelled.", 499, false);
+        }
         if (attempt >= maxAttempts) {
           const msg = e instanceof Error && e.name === "TimeoutError" ? "OpenAI image request timed out." : "Could not reach OpenAI (network error).";
           throw new OpenAIError(msg, 0, true);
@@ -94,30 +101,38 @@ export class OpenAIClient {
     if (req.size) body.size = req.size;
     if (req.quality) body.quality = req.quality;
     if (req.outputFormat) body.output_format = req.outputFormat;
-    return this.request("/v1/images/generations", () => ({
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }));
+    return this.request(
+      "/v1/images/generations",
+      () => ({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      req.signal,
+    );
   }
 
   /** Reference-guided generation/editing via /v1/images/edits (multipart/form-data). */
   async edit(req: OpenAIImageRequest & { images: OpenAIImageInput[] }): Promise<OpenAIImageResponse> {
     if (!req.images.length) return this.generate(req);
-    return this.request("/v1/images/edits", () => {
-      const form = new FormData();
-      form.append("model", req.model);
-      form.append("prompt", req.prompt);
-      if (req.n !== undefined) form.append("n", String(req.n));
-      if (req.size) form.append("size", req.size);
-      if (req.quality) form.append("quality", req.quality);
-      if (req.outputFormat) form.append("output_format", req.outputFormat);
-      const field = req.images.length === 1 ? "image" : "image[]";
-      for (const img of req.images) {
-        form.append(field, new Blob([new Uint8Array(img.data)], { type: img.contentType }), img.filename);
-      }
-      return { method: "POST", body: form };
-    });
+    return this.request(
+      "/v1/images/edits",
+      () => {
+        const form = new FormData();
+        form.append("model", req.model);
+        form.append("prompt", req.prompt);
+        if (req.n !== undefined) form.append("n", String(req.n));
+        if (req.size) form.append("size", req.size);
+        if (req.quality) form.append("quality", req.quality);
+        if (req.outputFormat) form.append("output_format", req.outputFormat);
+        const field = req.images.length === 1 ? "image" : "image[]";
+        for (const img of req.images) {
+          form.append(field, new Blob([new Uint8Array(img.data)], { type: img.contentType }), img.filename);
+        }
+        return { method: "POST", body: form };
+      },
+      req.signal,
+    );
   }
 }
 

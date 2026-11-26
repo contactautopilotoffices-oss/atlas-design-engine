@@ -1,9 +1,10 @@
 "use client";
-import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Circle, ImagePlus, Loader2, RefreshCw, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Circle, ImagePlus, Loader2, RefreshCw, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/components/api";
+import { useLightbox, ZoomBadge } from "@/components/lightbox";
 import type { ReferenceView } from "@/components/references";
 import { useSession } from "@/components/session";
 import { Button, cx, ErrorNote, Field, inputCls, Modal, Pill, Spinner, StageBadge } from "@/components/ui";
@@ -59,8 +60,11 @@ export default function VisualisePage() {
   const [picker, setPicker] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Record<string, JobView>>({});
+  const abortRef = useRef<AbortController | null>(null);
+  const { openLightbox, lightboxNode } = useLightbox();
 
   const briefBody = useMemo(() => ({ roles, designObjective: objective, refinementOfAssetId: refineId, modelId }), [roles, objective, refineId, modelId]);
 
@@ -116,18 +120,38 @@ export default function VisualisePage() {
   async function generate() {
     setSubmitting(true);
     setSubmitErr(null);
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const res = await api<{ jobs: GenerationJob[] }>(`/api/sessions/${sessionId}/rooms/${roomId}/generate`, {
         method: "POST",
         json: { ...briefBody, modelId, resolution, aspectRatio: aspect, alternatives, extra, confirmed: true },
+        signal: ac.signal,
       });
       setJobs((j) => ({ ...j, ...Object.fromEntries(res.jobs.map((job) => [job.id, { job, assets: [] }])) }));
       setConfirmOpen(false);
       reload();
     } catch (e) {
+      if ((e as Error).name !== "AbortError") setSubmitErr((e as Error).message);
+    } finally {
+      abortRef.current = null;
+      setSubmitting(false);
+    }
+  }
+
+  async function stopGeneration() {
+    setStopping(true);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setSubmitting(false);
+    setConfirmOpen(false);
+    try {
+      await api(`/api/sessions/${sessionId}/previews`, { method: "DELETE" });
+      await reload();
+    } catch (e) {
       setSubmitErr((e as Error).message);
     } finally {
-      setSubmitting(false);
+      setStopping(false);
     }
   }
 
@@ -209,8 +233,18 @@ export default function VisualisePage() {
                 const sent = i + (refineId ? 1 : 0) < (preview?.imagesSent ?? 0);
                 return (
                   <div key={`${r.referenceId}-${r.role}`} className="flex items-center gap-3 rounded-xl bg-stone-50 p-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {v && <img src={v.thumbUrl} alt="" className="h-12 w-16 rounded-lg object-cover" />}
+                    {v && (
+                      <button
+                        type="button"
+                        onClick={() => openLightbox({ src: v.imageUrl, title: `${r.referenceCode} · ${r.projectName}` })}
+                        className="group relative h-12 w-16 shrink-0 cursor-zoom-in overflow-hidden rounded-lg"
+                        aria-label={`Enlarge ${r.referenceCode}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={v.thumbUrl} alt="" className="size-full object-cover" />
+                        <ZoomBadge className="right-0.5 top-0.5 p-1" />
+                      </button>
+                    )}
                     <div className="min-w-0 flex-1 text-xs">
                       <p className="font-medium">{r.referenceCode} · {r.projectName}</p>
                       <p className="text-stone-600">{r.role === "primary" ? "Primary design reference" : ROLES.find((x) => x.v === r.role)?.l}</p>
@@ -287,13 +321,28 @@ export default function VisualisePage() {
 
         <section className="space-y-4">
           <div className="rounded-3xl bg-white p-5 ring-1 ring-stone-100">
-            <h2 className="mb-3 font-display text-xl">Generated concepts</h2>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-xl">Generated concepts</h2>
+              {(submitting || jobList.some(({ job }) => !TERMINAL.includes(job.status))) && (
+                <Button size="sm" variant="danger" onClick={stopGeneration} loading={stopping}>
+                  <Square className="size-3.5 fill-current" /> Stop generating AI
+                </Button>
+              )}
+            </div>
             {allAssets.length === 0 && jobList.length === 0 && <p className="text-sm text-stone-600">Nothing generated for this room yet.</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               {allAssets.map((a) => (
                 <figure key={a.id} className="space-y-1.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={a.url} alt="Generated concept" className="w-full rounded-2xl" />
+                  <button
+                    type="button"
+                    onClick={() => openLightbox({ src: a.url, title: `${room.room.name} · AI concept` })}
+                    className="group relative block w-full cursor-zoom-in overflow-hidden rounded-2xl"
+                    aria-label="Enlarge generated concept"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={a.url} alt="Generated concept" className="w-full rounded-2xl" />
+                    <ZoomBadge className="right-2.5 top-2.5" />
+                  </button>
                   <figcaption className="flex items-center justify-between gap-2 text-xs">
                     <Pill tone={a.reviewStatus === "approved" ? "good" : a.reviewStatus === "rejected" ? "bad" : "neutral"}>{a.reviewStatus === "unreviewed" ? "Awaiting designer review" : a.reviewStatus.replace("_", " ")}</Pill>
                     <div className="flex items-center gap-2">
@@ -341,8 +390,16 @@ export default function VisualisePage() {
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {pool.map((r) => (
               <div key={r.id} className="space-y-1.5 rounded-xl bg-stone-50 p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r.thumbUrl} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                <button
+                  type="button"
+                  onClick={() => openLightbox({ src: r.imageUrl, title: `${r.project.name} · ${r.roomTypeName ?? r.referenceCode}` })}
+                  className="group relative block w-full cursor-zoom-in overflow-hidden rounded-lg"
+                  aria-label={`Enlarge ${r.referenceCode}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={r.thumbUrl} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                  <ZoomBadge className="right-1.5 top-1.5 p-1" />
+                </button>
                 <p className="truncate text-xs font-medium">{r.project.name} · {r.roomTypeName}</p>
                 <select className={cx(inputCls, "py-1 text-xs")} defaultValue="" onChange={(e) => { if (!e.target.value) return; setRoles((rs) => [...rs, { referenceId: r.id, role: e.target.value as ReferenceRole }]); setPicker(false); }}>
                   <option value="">Use for…</option>
@@ -362,11 +419,12 @@ export default function VisualisePage() {
           </p>
           <ErrorNote error={submitErr} />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => (submitting ? stopGeneration() : setConfirmOpen(false))}>{submitting ? "Stop generating AI" : "Cancel"}</Button>
             <Button onClick={generate} loading={submitting}><Sparkles className="size-4" /> Yes, generate</Button>
           </div>
         </div>
       </Modal>
+      {lightboxNode}
     </div>
   );
 }

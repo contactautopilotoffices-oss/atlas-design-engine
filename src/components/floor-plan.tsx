@@ -3,11 +3,31 @@ import type { FloorPlan } from "@/modules/core/schemas";
 
 export type RoomState = "empty" | "submitted";
 
-/** Interactive 2D plan. Rooms are SVG polygons in plan units; clicking a room selects it. */
-export function FloorPlanView({ plan, activeRoomId, roomStates, roomTypeNames, onSelect }: { plan: FloorPlan; activeRoomId: string | null; roomStates: Record<string, RoomState>; roomTypeNames: Record<string, string>; onSelect: (roomId: string) => void }) {
+export type HoverAnchor = { xPct: number; yPct: number };
+
+/** Interactive 2D plan. Rooms are SVG polygons in plan units; hovering shows previews and clicking selects it. */
+export function FloorPlanView({
+  plan,
+  activeRoomId,
+  hoveredRoomId,
+  roomStates,
+  roomTypeNames,
+  onSelect,
+  onHoverRoom,
+}: {
+  plan: FloorPlan;
+  activeRoomId: string | null;
+  hoveredRoomId?: string | null;
+  roomStates: Record<string, RoomState>;
+  roomTypeNames: Record<string, string>;
+  onSelect: (roomId: string) => void;
+  onHoverRoom?: (roomId: string | null, anchor?: HoverAnchor) => void;
+}) {
   const pad = 0.6;
   const drawing = plan.background;
-  const vb = `${-pad} ${-pad} ${plan.width + pad * 2} ${plan.height + pad * 2}`;
+  const vbWidth = plan.width + pad * 2;
+  const vbHeight = plan.height + pad * 2;
+  const vb = `${-pad} ${-pad} ${vbWidth} ${vbHeight}`;
   const line = Math.max(plan.width, plan.height) / 400;
   return (
     <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-stone-100">
@@ -20,7 +40,7 @@ export function FloorPlanView({ plan, activeRoomId, roomStates, roomTypeNames, o
             <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#efe9df" strokeWidth="0.02" />
           </pattern>
         </defs>
-        <rect x={-pad} y={-pad} width={plan.width + pad * 2} height={plan.height + pad * 2} fill={drawing ? "#ffffff" : "url(#grid)"} />
+        <rect x={-pad} y={-pad} width={vbWidth} height={vbHeight} fill={drawing ? "#ffffff" : "url(#grid)"} />
         {drawing ? (
           // The real drawing sits underneath; rooms are see-through click areas on top of it.
           <image href={`/api/assets/floor-plans/${drawing.key}`} x={0} y={0} width={plan.width} height={plan.height} preserveAspectRatio="none" />
@@ -28,11 +48,15 @@ export function FloorPlanView({ plan, activeRoomId, roomStates, roomTypeNames, o
           <rect x={0} y={0} width={plan.width} height={plan.height} fill="none" stroke="#1d1b18" strokeWidth="0.12" />
         )}
         {plan.rooms.map((room) => {
-          const active = room.id === activeRoomId;
+          const active = room.id === activeRoomId || room.id === hoveredRoomId;
           const state = roomStates[room.id] ?? "empty";
           const pts = room.polygon.map((p) => p.join(",")).join(" ");
           const cx = room.polygon.reduce((s, p) => s + p[0], 0) / room.polygon.length;
           const cy = room.polygon.reduce((s, p) => s + p[1], 0) / room.polygon.length;
+          const anchor: HoverAnchor = {
+            xPct: ((cx + pad) / vbWidth) * 100,
+            yPct: ((cy + pad) / vbHeight) * 100,
+          };
           const w = Math.max(...room.polygon.map((p) => p[0])) - Math.min(...room.polygon.map((p) => p[0]));
           const h = Math.max(...room.polygon.map((p) => p[1])) - Math.min(...room.polygon.map((p) => p[1]));
           // Fit the label to the room's width so names never spill into neighbouring rooms.
@@ -46,6 +70,9 @@ export function FloorPlanView({ plan, activeRoomId, roomStates, roomTypeNames, o
               tabIndex={0}
               aria-label={`${room.name}${state === "submitted" ? ", choice submitted" : ""}`}
               onClick={() => onSelect(room.id)}
+              onMouseEnter={() => onHoverRoom?.(room.id, anchor)}
+              onMouseLeave={() => onHoverRoom?.(null)}
+              onFocus={() => onHoverRoom?.(room.id, anchor)}
               onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(room.id)}
               className="cursor-pointer outline-none [&:focus-visible>polygon]:stroke-[#8a6a45]"
             >

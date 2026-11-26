@@ -15,6 +15,7 @@ export const TABLES: Record<CollectionName, string> = {
   roomTypes: "room_types",
   materials: "materials",
   offerings: "offerings",
+  boqItems: "boq_items",
   properties: "properties",
   floorPlans: "floor_plans",
   settings: "app_settings",
@@ -66,6 +67,16 @@ export class SupabaseRepository implements Repository {
     const { data, error } = await this.client.from(TABLES[c]).insert(rowIn(rec as Record<string, unknown>)).select().single();
     if (error) fail("insert", error);
     return rowOut(data) as RecordOf<C>;
+  }
+
+  async insertMany<C extends CollectionName>(c: C, recs: RecordOf<C>[]) {
+    if (!recs.length) return [];
+    const { data, error } = await this.client
+      .from(TABLES[c])
+      .insert(recs.map((r) => rowIn(r as Record<string, unknown>)))
+      .select();
+    if (error) fail("insert", error);
+    return (data ?? []).map((r) => rowOut(r) as RecordOf<C>);
   }
 
   async update<C extends CollectionName>(c: C, id: string, patch: Partial<RecordOf<C>>) {

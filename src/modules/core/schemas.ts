@@ -79,6 +79,7 @@ export const Offering = z.object({
   id,
   name: z.string().min(1),
   description: z.string().default(""),
+  tierGuidance: z.string().default(""),
   rank: z.number().int().default(0),
   isDemo: z.boolean().default(false),
   rules: OfferingRules,
@@ -86,6 +87,30 @@ export const Offering = z.object({
   updatedAt: isoDate,
 });
 export type Offering = z.infer<typeof Offering>;
+
+export const BoqBasis = z.enum(["floor_area_sqft", "wall_area_sqft", "ceiling_area_sqft", "seat_count", "room_fixed"]);
+export type BoqBasis = z.infer<typeof BoqBasis>;
+
+export const BoqCategory = z.enum(["civil_partitions", "flooring", "ceiling", "wall_finishes", "lighting_electrical", "furniture", "av_hvac_misc"]);
+export type BoqCategory = z.infer<typeof BoqCategory>;
+
+export const BoqItem = z.object({
+  id,
+  offeringId: z.string().min(1),
+  category: BoqCategory,
+  name: z.string().min(1),
+  specification: z.string().default(""),
+  unit: z.string().min(1),
+  basis: BoqBasis,
+  multiplier: z.number().positive().default(1),
+  unitRate: z.number().nonnegative(),
+  roomTypeIds: z.array(z.string()).default([]),
+  sortOrder: z.number().int().default(0),
+  isDemo: z.boolean().default(false),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type BoqItem = z.infer<typeof BoqItem>;
 
 export const Property = z.object({
   id,
@@ -117,6 +142,18 @@ export const FloorPlanRoom = z.object({
 });
 export type FloorPlanRoom = z.infer<typeof FloorPlanRoom>;
 
+export const FloorPlanPreview = z.object({
+  id,
+  roomId: z.string(),
+  tierOfferingId: z.string(),
+  referenceId: z.string(),
+  blobKey: z.string(),
+  mimeType: z.string().default("image/png"),
+  modelId: z.string(),
+  createdAt: isoDate,
+});
+export type FloorPlanPreview = z.infer<typeof FloorPlanPreview>;
+
 export const FloorPlan = z.object({
   id,
   propertyId: z.string().min(1),
@@ -144,6 +181,7 @@ export const FloorPlan = z.object({
     .object({ method: z.enum(["drawing", "confirmed", "ai_estimate"]), metresPerPixel: z.number().positive().nullable(), note: z.string().default("") })
     .nullable()
     .default(null),
+  previews: z.array(FloorPlanPreview).default([]),
   createdAt: isoDate,
   updatedAt: isoDate,
 });
@@ -154,6 +192,7 @@ export const AppSettings = z.object({
   promptInstructions: z.array(z.string()),
   negativePrompt: z.string(),
   defaultModelId: z.string(),
+  currency: z.string().default("INR"),
   updatedAt: isoDate,
 });
 export type AppSettings = z.infer<typeof AppSettings>;
@@ -547,6 +586,7 @@ export const GenerationJob = z.object({
     }),
   ),
   refinementOfAssetId: z.string().nullable().default(null),
+  tierOfferingId: z.string().nullable().default(null),
   idempotencyKey: z.string(),
   providerRequestId: z.string().nullable().default(null),
   providerStatusUrl: z.string().nullable().default(null),
@@ -570,6 +610,7 @@ export const GeneratedAsset = z.object({
   jobId: z.string(),
   sessionId: z.string(),
   roomId: z.string(),
+  tierOfferingId: z.string().nullable().default(null),
   blobKey: z.string(),
   providerUrl: z.string().nullable(),
   mimeType: z.string(),
@@ -609,6 +650,7 @@ export const Collections = {
   roomTypes: RoomType,
   materials: Material,
   offerings: Offering,
+  boqItems: BoqItem,
   properties: Property,
   floorPlans: FloorPlan,
   settings: AppSettings,

@@ -1,13 +1,14 @@
 "use client";
-import { ArrowRight, Clock, Trash2 } from "lucide-react";
+import { ArrowRight, Clock, Loader2, Sparkles, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/components/api";
 import { useConfig } from "@/components/references";
 import { Button, ErrorNote, Field, inputCls, Pill, Spinner, StageBadge } from "@/components/ui";
 
 type Session = { id: string; propertyId: string; offeringId: string; clientName: string; createdAt: string };
+type HomePreviewRun = { status: "idle" | "running" | "completed" | "cancelled" | "failed"; total: number; done: number; cachedCount: number; expectedTotal: number };
 
 const FLOW = ["Open the property", "Open the 2D floor plan", "Click a room", "Browse matching references", "Enlarge and select an image", "Submit choice", "Preview selected rooms"];
 
@@ -21,6 +22,8 @@ export default function Workspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mine, setMine] = useState<Session[]>([]);
+  const [previewRun, setPreviewRun] = useState<HomePreviewRun | null>(null);
+  const [stoppingPre, setStoppingPre] = useState(false);
 
   useEffect(() => {
     api<{ sessions: Session[] }>("/api/sessions").then((d) => setMine(d.sessions)).catch(() => undefined);
@@ -36,6 +39,24 @@ export default function Workspace() {
   const plans = useMemo(() => config?.floorPlans.filter((f) => f.propertyId === propertyId && f.status !== "draft") ?? [], [config, propertyId]);
   const floorPlanId = plans.some((p) => p.id === floorPlanChoice) ? floorPlanChoice : (plans[0]?.id ?? "");
   const property = config?.properties.find((p) => p.id === propertyId);
+  const selectedPlan = plans.find((p) => p.id === floorPlanId) ?? null;
+
+  const fetchPreviewStatus = useCallback(() => {
+    if (!config?.isStaff || !floorPlanId) return;
+    api<HomePreviewRun>(`/api/floor-plans/${floorPlanId}/previews`).then(setPreviewRun).catch(() => undefined);
+  }, [config?.isStaff, floorPlanId]);
+
+  useEffect(() => {
+    fetchPreviewStatus();
+  }, [fetchPreviewStatus]);
+
+  useEffect(() => {
+    if (previewRun?.status !== "running" || !floorPlanId) return;
+    const t = setInterval(() => {
+      api<HomePreviewRun>(`/api/floor-plans/${floorPlanId}/previews`).then(setPreviewRun).catch(() => undefined);
+    }, 1500);
+    return () => clearInterval(t);
+  }, [previewRun?.status, floorPlanId]);
 
   async function open() {
     setBusy(true);
@@ -97,6 +118,53 @@ export default function Workspace() {
               <Field label="Client name (optional)">
                 <input className={inputCls} value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="e.g. Acme Pvt Ltd" />
               </Field>
+              {selectedPlan && config?.offerings && (
+                <div className="space-y-2 rounded-2xl bg-stone-50 p-3 text-xs ring-1 ring-stone-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-stone-700">
+                      AI hover previews ready:{" "}
+                      <b>
+                        {previewRun?.cachedCount ?? selectedPlan.previews?.length ?? 0} / {previewRun?.expectedTotal ?? selectedPlan.rooms.length * config.offerings.length}
+                      </b>
+                    </span>
+                    {config.isStaff && previewRun?.status === "running" && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        loading={stoppingPre}
+                        onClick={async () => {
+                          setStoppingPre(true);
+                          try {
+                            setPreviewRun(await api<HomePreviewRun>(`/api/floor-plans/${selectedPlan.id}/previews`, { method: "DELETE" }));
+                          } finally {
+                            setStoppingPre(false);
+                          }
+                        }}
+                      >
+                        <Square className="size-3 fill-current" /> Stop generating AI
+                      </Button>
+                    )}
+                    {config.isStaff &&
+                      previewRun?.status !== "running" &&
+                      (previewRun?.cachedCount ?? selectedPlan.previews?.length ?? 0) < (previewRun?.expectedTotal ?? selectedPlan.rooms.length * config.offerings.length) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={async () => {
+                            setPreviewRun(await api<HomePreviewRun>(`/api/floor-plans/${selectedPlan.id}/previews`, { method: "POST", json: { async: true } }));
+                          }}
+                        >
+                          <Sparkles className="size-3" /> Render before opening
+                        </Button>
+                      )}
+                  </div>
+                  {previewRun?.status === "running" && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-planned">
+                      <Loader2 className="size-3 animate-spin" /> Pre-rendering AI room previews ({previewRun.done} / {previewRun.total}) so client hover is instant…
+                    </p>
+                  )}
+                </div>
+              )}
               <ErrorNote error={error} />
               <Button size="lg" className="w-full" onClick={open} loading={busy} disabled={!propertyId || !floorPlanId || !offeringId}>
                 Open {property?.name ?? "property"} <ArrowRight className="size-4" />

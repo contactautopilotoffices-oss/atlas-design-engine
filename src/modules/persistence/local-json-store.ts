@@ -82,7 +82,7 @@ export class LocalJsonRepository implements Repository {
   private async write(data: StoreFile) {
     data.updatedAt = new Date().toISOString();
     await fs.mkdir(this.dataDir, { recursive: true });
-    const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+    const tmp = `${this.file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     const handle = await fs.open(tmp, "w");
     try {
       await handle.writeFile(JSON.stringify(data, null, 2), "utf8");
@@ -163,6 +163,21 @@ export class LocalJsonRepository implements Repository {
         throw new AppError(`Duplicate id in ${c}.`, 409, "conflict");
       rows.push(structuredClone(rec));
       return structuredClone(rec);
+    });
+  }
+
+  insertMany<C extends CollectionName>(c: C, recs: RecordOf<C>[]) {
+    if (!recs.length) return Promise.resolve([]);
+    return this.mutate((data) => {
+      const rows = data.collections[c] as RecordOf<C>[];
+      const existingIds = new Set(rows.map((r) => (r as { id: string }).id));
+      for (const rec of recs) {
+        const id = (rec as { id: string }).id;
+        if (existingIds.has(id)) throw new AppError(`Duplicate id in ${c}.`, 409, "conflict");
+        existingIds.add(id);
+        rows.push(structuredClone(rec));
+      }
+      return structuredClone(recs);
     });
   }
 

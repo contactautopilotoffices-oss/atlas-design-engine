@@ -3,13 +3,15 @@ import { Check, Columns2, FileText, Maximize2, Search, SlidersHorizontal, Trash2
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReferenceView } from "@/modules/intelligence/library";
 import { api, deleteResource } from "./api";
+import { useLightbox, ZoomBadge } from "./lightbox";
 import { Button, cx, Empty, ErrorNote, inputCls, Modal, Pill, Spinner, Swatches } from "./ui";
 
 export type { ReferenceView };
 
 export type Config = {
   roomTypes: Array<{ id: string; name: string }>;
-  offerings: Array<{ id: string; name: string; description: string; rank: number; isDemo: boolean }>;
+  offerings: Array<{ id: string; name: string; description: string; tierGuidance?: string; rank: number; isDemo: boolean }>;
+  boqItems?: Array<import("@/modules/core/schemas").BoqItem>;
   properties: Array<{ id: string; name: string; city: string; isDemo: boolean }>;
   floorPlans: Array<import("@/modules/core/schemas").FloorPlan>;
   directions: Array<{ id: string; name: string; status: string }>;
@@ -90,6 +92,7 @@ export function ReferenceDetail({ id, onClose, onSelect, selectedId, offeringId,
   const current = nav ?? id;
   const [loaded, setLoaded] = useState<{ id: string; data: Detail | null; err: string | null } | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
+  const { openLightbox, lightboxNode } = useLightbox();
   useEffect(() => {
     if (!current) return;
     let live = true;
@@ -112,10 +115,16 @@ export function ReferenceDetail({ id, onClose, onSelect, selectedId, offeringId,
       {!r && !err && <div className="p-10"><Spinner /></div>}
       {r && m && (
         <div className="grid lg:grid-cols-[1.6fr_1fr]">
-          <div className="bg-ink">
+          <button
+            type="button"
+            onClick={() => openLightbox({ src: r.imageUrl, title: `${r.referenceCode} · ${r.project.name}`, subtitle: sourceLabel(r) })}
+            className="group relative block bg-ink cursor-zoom-in"
+            aria-label="Enlarge full screen"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={r.imageUrl} alt={r.referenceCode} className="mx-auto max-h-[80vh] w-full object-contain" />
-          </div>
+            <ZoomBadge className="right-3 top-3" />
+          </button>
           <div className="space-y-4 p-6">
             <div>
               <div className="flex items-center gap-2">
@@ -204,11 +213,13 @@ export function ReferenceDetail({ id, onClose, onSelect, selectedId, offeringId,
           </div>
         </div>
       )}
+      {lightboxNode}
     </Modal>
   );
 }
 
 export function CompareView({ items, onClose, onRemove }: { items: ReferenceView[]; onClose: () => void; onRemove: (id: string) => void }) {
+  const { openLightbox, lightboxNode } = useLightbox();
   return (
     <Modal open={items.length > 0} onClose={onClose} wide title="Compare references">
       <div className="p-6">
@@ -216,8 +227,16 @@ export function CompareView({ items, onClose, onRemove }: { items: ReferenceView
         <div className={cx("grid gap-4", items.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2")}>
           {items.map((r) => (
             <div key={r.id} className="space-y-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.imageUrl} alt={r.referenceCode} className="aspect-[4/3] w-full rounded-xl object-cover" />
+              <button
+                type="button"
+                onClick={() => openLightbox({ src: r.imageUrl, title: `${r.project.name} · ${r.referenceCode}`, subtitle: sourceLabel(r) })}
+                className="group relative block w-full cursor-zoom-in overflow-hidden rounded-xl"
+                aria-label={`Enlarge ${r.referenceCode}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.imageUrl} alt={r.referenceCode} className="aspect-[4/3] w-full rounded-xl object-cover" />
+                <ZoomBadge className="right-2 top-2" />
+              </button>
               <div className="flex items-center justify-between">
                 <p className="font-medium">{r.project.name}</p>
                 <button onClick={() => onRemove(r.id)} className="text-xs text-stone-600 hover:underline">Remove</button>
@@ -231,6 +250,7 @@ export function CompareView({ items, onClose, onRemove }: { items: ReferenceView
           ))}
         </div>
       </div>
+      {lightboxNode}
     </Modal>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
-import { Check, CircleAlert, Eye, EyeOff, FileUp, MousePointerSquareDashed, Plus, Trash2, Upload } from "lucide-react";
+import { Check, CircleAlert, Eye, EyeOff, FileUp, Loader2, MousePointerSquareDashed, Plus, Sparkles, Square, Trash2, Upload } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { api } from "@/components/api";
+import { useLightbox, ZoomBadge } from "@/components/lightbox";
 import { useConfig } from "@/components/references";
 import { Button, cx, Empty, ErrorNote, Field, inputCls, Pill, Spinner } from "@/components/ui";
 import type { FloorPlan } from "@/modules/core/schemas";
@@ -107,6 +108,20 @@ function UploadPanel({ onDone, reader }: { onDone: (plan: FloorPlan, notes: stri
   );
 }
 
+type PreviewJobStatus = {
+  floorPlanId: string;
+  status: "idle" | "running" | "completed" | "cancelled" | "failed";
+  total: number;
+  done: number;
+  generated: number;
+  skippedExisting: number;
+  skippedNoRefs: number;
+  errors: string[];
+  cancelled: boolean;
+  cachedCount: number;
+  expectedTotal: number;
+};
+
 function Editor({ plan, roomTypes, onSaved, onDeleted, notes }: { plan: FloorPlan; roomTypes: RoomType[]; onSaved: (p: FloorPlan) => void; onDeleted: () => void; notes: string[] }) {
   const [name, setName] = useState(plan.name);
   const [rooms, setRooms] = useState<EditRoom[]>(() => toEdit(plan));
@@ -116,8 +131,35 @@ function Editor({ plan, roomTypes, onSaved, onDeleted, notes }: { plan: FloorPla
   const [width, setWidth] = useState("");
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [previewRun, setPreviewRun] = useState<PreviewJobStatus | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
+
+  const pollPreviewStatus = useCallback(() => {
+    api<PreviewJobStatus>(`/api/floor-plans/${plan.id}/previews`)
+      .then(setPreviewRun)
+      .catch(() => undefined);
+  }, [plan.id]);
+
+  useEffect(() => {
+    pollPreviewStatus();
+  }, [pollPreviewStatus]);
+
+  useEffect(() => {
+    if (previewRun?.status !== "running") return;
+    const t = setInterval(async () => {
+      const st = await api<PreviewJobStatus>(`/api/floor-plans/${plan.id}/previews`).catch(() => null);
+      if (st) {
+        setPreviewRun(st);
+        if (st.status !== "running") {
+          const fresh = await api<{ plan: FloorPlan }>(`/api/floor-plans/${plan.id}`).catch(() => null);
+          if (fresh) onSaved(fresh.plan);
+        }
+      }
+    }, 1500);
+    return () => clearInterval(t);
+  }, [previewRun?.status, plan.id, onSaved]);
   const colour = useMemo(() => Object.fromEntries(roomTypes.map((t, i) => [t.id, COLOURS[i % COLOURS.length]])), [roomTypes]);
   const typeName = useMemo(() => Object.fromEntries(roomTypes.map((t) => [t.id, t.name])), [roomTypes]);
   const scaleOk = plan.scale?.method === "drawing" || plan.scale?.method === "confirmed";
@@ -315,14 +357,29 @@ function Editor({ plan, roomTypes, onSaved, onDeleted, notes }: { plan: FloorPla
                 onClick={() =>
                   run("publish", async () => {
                     if (dirty) await save();
-                    return (await api<{ plan: FloorPlan }>(`/api/floor-plans/${plan.id}/publish`, { method: "POST", json: { publish: true } })).plan;
+                    const res = await api<{ plan: FloorPlan; previewStatus?: PreviewJobStatus | null }>(`/api/floor-plans/${plan.id}/publish`, {
+                      method: "POST",
+                      json: { publish: true, autoPreview: true },
+                    });
+                    if (res.previewStatus) setPreviewRun(res.previewStatus);
+                    return res.plan;
                   })
                 }
               >
                 <Eye className="size-4" /> Publish for clients
               </Button>
             ) : (
-              <Button variant="ghost" loading={busy === "unpublish"} onClick={() => run("unpublish", async () => (await api<{ plan: FloorPlan }>(`/api/floor-plans/${plan.id}/publish`, { method: "POST", json: { publish: false } })).plan)}>
+              <Button
+                variant="ghost"
+                loading={busy === "unpublish"}
+                onClick={() =>
+                  run("unpublish", async () => {
+                    const res = await api<{ plan: FloorPlan }>(`/api/floor-plans/${plan.id}/publish`, { method: "POST", json: { publish: false } });
+                    pollPreviewStatus();
+                    return res.plan;
+                  })
+                }
+              >
                 <EyeOff className="size-4" /> Unpublish
               </Button>
             )}
@@ -337,6 +394,74 @@ function Editor({ plan, roomTypes, onSaved, onDeleted, notes }: { plan: FloorPla
           </div>
           {!scaleOk && <p className="text-xs text-amber-700">Check the size in step 1 before publishing.</p>}
         </div>
+
+        <div className="space-y-2 rounded-2xl bg-white p-4 ring-1 ring-stone-100">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">4. Tiered AI hover previews</p>
+            <Pill tone={previewRun?.status === "running" ? "warn" : "good"}>
+              {previewRun?.cachedCount ?? plan.previews?.length ?? 0}
+              {previewRun ? ` / ${previewRun.expectedTotal}` : ""} ready
+            </Pill>
+          </div>
+          <p className="text-xs text-stone-600">
+            Publishing automatically starts pre-rendering Economy &amp; Premium Economy previews in the background before clients open the plan.
+          </p>
+          {previewRun?.status === "running" ? (
+            <div className="space-y-2 rounded-xl bg-planned-soft p-3 text-xs text-planned">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <Loader2 className="size-3.5 animate-spin" /> Rendering AI previews ({previewRun.done} / {previewRun.total || previewRun.expectedTotal})…
+                </span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  loading={stopping}
+                  onClick={async () => {
+                    setStopping(true);
+                    try {
+                      const st = await api<PreviewJobStatus>(`/api/floor-plans/${plan.id}/previews`, { method: "DELETE" });
+                      setPreviewRun(st);
+                      const fresh = await api<{ plan: FloorPlan }>(`/api/floor-plans/${plan.id}`);
+                      onSaved(fresh.plan);
+                    } finally {
+                      setStopping(false);
+                    }
+                  }}
+                >
+                  <Square className="size-3 fill-current" /> Stop generating AI
+                </Button>
+              </div>
+              {previewRun.total > 0 && (
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/70">
+                  <div className="h-full rounded-full bg-bronze transition-all" style={{ width: `${Math.min(100, Math.round((previewRun.done / previewRun.total) * 100))}%` }} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={busy === "previews"}
+                onClick={() =>
+                  run("previews", async () => {
+                    const st = await api<PreviewJobStatus>(`/api/floor-plans/${plan.id}/previews`, { method: "POST", json: { async: true } });
+                    setPreviewRun(st);
+                  })
+                }
+              >
+                <Sparkles className="size-3.5" /> Pre-generate missing tier previews
+              </Button>
+            </div>
+          )}
+          {previewRun && previewRun.status !== "idle" && previewRun.status !== "running" && (
+            <p className="text-xs text-stone-700">
+              {previewRun.cancelled ? "Stopped early: " : ""}Generated {previewRun.generated}, reused {previewRun.skippedExisting}
+              {previewRun.skippedNoRefs ? `, skipped ${previewRun.skippedNoRefs} without approved refs` : ""}
+              {previewRun.errors.length ? `. Error: ${previewRun.errors[0]}` : "."}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -345,6 +470,7 @@ function Editor({ plan, roomTypes, onSaved, onDeleted, notes }: { plan: FloorPla
 function FloorPlansInner() {
   const params = useSearchParams();
   const { config } = useConfig();
+  const { openLightbox, lightboxNode } = useLightbox();
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
   const [reader, setReader] = useState<Reader | null>(null);
   const [openId, setOpenId] = useState<string | null>(params.get("planId"));
@@ -396,23 +522,33 @@ function FloorPlansInner() {
             {plans?.length === 0 && <Empty title="No floor plans yet">Upload your first plan on the left.</Empty>}
             {plans?.map((p) => (
               <div key={p.id} className="flex w-full items-center gap-2 rounded-2xl bg-white p-3 ring-1 ring-stone-100 hover:ring-stone-200">
-                <button disabled={p.isSample} onClick={() => (setNotes([]), setOpenId(p.id))} className="flex min-w-0 flex-1 items-center gap-4 text-left disabled:cursor-default">
-                  <div className="grid h-16 w-24 shrink-0 place-items-center overflow-hidden rounded-lg bg-stone-50">
+                <div className="flex min-w-0 flex-1 items-center gap-4 text-left">
+                  <div className="group relative grid h-16 w-24 shrink-0 place-items-center overflow-hidden rounded-lg bg-stone-50">
                     {p.background ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={`/api/assets/floor-plans/${p.background.key}`} alt="" className="h-full w-full object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => openLightbox({ src: `/api/assets/floor-plans/${p.background!.key}`, title: p.name, subtitle: `${p.propertyName} · ${p.rooms.length} rooms` })}
+                        className="relative block size-full cursor-zoom-in"
+                        aria-label={`Enlarge ${p.name}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/assets/floor-plans/${p.background.key}`} alt="" className="h-full w-full object-contain" />
+                        <ZoomBadge className="right-1 top-1 p-1" />
+                      </button>
                     ) : (
                       <span className="text-[10px] text-stone-400">{p.isSample ? "SAMPLE" : (p.source?.kind ?? "").toUpperCase()}</span>
                     )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{p.name}</p>
-                    <p className="text-xs text-stone-600">
-                      {p.propertyName} · {p.rooms.length} rooms · {p.width.toFixed(0)} x {p.height.toFixed(0)} m
-                    </p>
-                  </div>
-                  {p.isSample ? <Pill tone="demo">Sample</Pill> : <Pill tone={p.status !== "draft" ? "good" : "warn"}>{p.status !== "draft" ? "Published" : "Draft"}</Pill>}
-                </button>
+                  <button disabled={p.isSample} onClick={() => (setNotes([]), setOpenId(p.id))} className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left disabled:cursor-default">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{p.name}</p>
+                      <p className="text-xs text-stone-600">
+                        {p.propertyName} · {p.rooms.length} rooms · {p.width.toFixed(0)} x {p.height.toFixed(0)} m · {p.previews?.length ?? 0} AI previews
+                      </p>
+                    </div>
+                    {p.isSample ? <Pill tone="demo">Sample</Pill> : <Pill tone={p.status !== "draft" ? "good" : "warn"}>{p.status !== "draft" ? "Published" : "Draft"}</Pill>}
+                  </button>
+                </div>
                 {!p.isSample && (
                   <button
                     aria-label={`Delete ${p.name}`}
@@ -436,6 +572,7 @@ function FloorPlansInner() {
           </div>
         </div>
       )}
+      {lightboxNode}
     </div>
   );
 }

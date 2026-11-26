@@ -8,9 +8,9 @@ import { Collections, type CollectionName } from "./schemas";
 import { AppError, newId, notFound, now } from "./util";
 
 /** Collections an admin may edit through the generic configuration API. */
-export const CONFIG_COLLECTIONS = ["roomTypes", "materials", "offerings", "properties", "floorPlans", "projects", "settings"] as const;
+export const CONFIG_COLLECTIONS = ["roomTypes", "materials", "offerings", "boqItems", "properties", "floorPlans", "projects", "settings"] as const;
 export type ConfigCollection = (typeof CONFIG_COLLECTIONS)[number];
-const PREFIX: Record<ConfigCollection, string> = { roomTypes: "rt", materials: "mat", offerings: "off", properties: "prop", floorPlans: "fp", projects: "prj", settings: "set" };
+const PREFIX: Record<ConfigCollection, string> = { roomTypes: "rt", materials: "mat", offerings: "off", boqItems: "boq", properties: "prop", floorPlans: "fp", projects: "prj", settings: "set" };
 
 export function assertConfigCollection(c: string): asserts c is ConfigCollection {
   if (!(CONFIG_COLLECTIONS as readonly string[]).includes(c)) throw new AppError("Unknown configuration collection.", 404);
@@ -40,7 +40,11 @@ export async function deleteConfig(c: ConfigCollection, id: string, actor: strin
   if (c === "floorPlans") return deletePlan(id, actor);
   const refs = await repo().list("references");
   if (c === "roomTypes" && refs.some((r) => r.metadata.roomTypeId === id)) throw new AppError("This room type is used by references. Reassign them first.", 409);
-  if (c === "offerings" && (await repo().list("designSessions")).some((s) => s.offeringId === id)) throw new AppError("This offering is used by design sessions. Archive it by renaming instead.", 409);
+  if (c === "offerings") {
+    if ((await repo().list("designSessions")).some((s) => s.offeringId === id)) throw new AppError("This offering is used by design sessions. Archive it by renaming instead.", 409);
+    const items = (await repo().list("boqItems")).filter((b) => b.offeringId === id);
+    for (const b of items) await repo().remove("boqItems", b.id);
+  }
   if (c === "properties") {
     const sessions = (await repo().list("designSessions")).filter((s) => s.propertyId === id);
     if (sessions.length && !opts.force) throw new AppError(`This property has ${sessions.length} design session(s). Delete those sessions first or force-delete.`, 409, "property_in_use");

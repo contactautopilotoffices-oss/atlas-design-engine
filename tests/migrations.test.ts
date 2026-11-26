@@ -39,7 +39,7 @@ describe("Supabase migrations", () => {
     await recordReview({ sessionId: s.id, roomId: "rm_meeting_1", generatedAssetId: null, action: "comment", comment: "ok" });
 
     // Insert in dependency order using the adapter's own column mapping
-    const order = ["roomTypes", "materials", "offerings", "properties", "floorPlans", "settings", "projects", "sourceDocuments", "references", "designDirections", "designSessions", "selections", "selectionRevisions", "roomSpecs", "generationJobs", "generatedAssets", "designerReviews", "auditLog"] as const;
+    const order = ["roomTypes", "materials", "offerings", "boqItems", "properties", "floorPlans", "settings", "projects", "sourceDocuments", "references", "designDirections", "designSessions", "selections", "selectionRevisions", "roomSpecs", "generationJobs", "generatedAssets", "designerReviews", "auditLog"] as const;
     expect([...order].sort()).toEqual([...COLLECTION_NAMES].sort());
     let inserted = 0;
     for (const c of order) {

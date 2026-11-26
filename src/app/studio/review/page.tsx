@@ -3,6 +3,7 @@ import { Check, CircleHelp, Save, Sparkles, Trash2, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { api, deleteResource } from "@/components/api";
+import { useLightbox, ZoomBadge } from "@/components/lightbox";
 import { sourceLabel, useConfig, type ReferenceView } from "@/components/references";
 import { Button, cx, Empty, ErrorNote, Field, inputCls, Modal, Pill, Spinner, Swatches } from "@/components/ui";
 import type { ReferenceMetadata } from "@/modules/core/schemas";
@@ -62,12 +63,20 @@ function Editor({ r, offerings, roomTypes, directions, aiConfigured, onSaved, on
   }
 
   const prov = (k: string) => r.provenance[k];
+  const { openLightbox, lightboxNode } = useLightbox();
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-2xl bg-ink">
+      <button
+        type="button"
+        onClick={() => openLightbox({ src: r.imageUrl, title: r.referenceCode, subtitle: `${r.project.name} · ${sourceLabel(r)}` })}
+        className="group relative block w-full cursor-zoom-in overflow-hidden rounded-2xl bg-ink"
+        aria-label="Enlarge full screen"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={r.imageUrl} alt="" className="mx-auto max-h-[46vh] object-contain" />
-      </div>
+        <ZoomBadge className="right-3 top-3" />
+      </button>
+      {lightboxNode}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <b>{r.referenceCode}</b> · {r.project.name} · {sourceLabel(r)} <Pill tone={r.reviewStatus === "approved" ? "good" : r.reviewStatus === "rejected" ? "bad" : "warn"}>{r.reviewStatus}</Pill>
         <Pill>{r.width} x {r.height}px</Pill>
@@ -288,10 +297,16 @@ function QuickReview({ projectId, roomTypes, aiConfigured, onDetails }: { projec
       {current && (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-3 rounded-3xl bg-white p-4 ring-1 ring-stone-100">
-            <div className="flex h-[52vh] items-center justify-center overflow-hidden rounded-2xl bg-ink">
+            <button
+              type="button"
+              onClick={() => onDetails(current)}
+              className="group relative flex h-[52vh] w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-2xl bg-ink"
+              aria-label={`Enlarge ${current.referenceCode}`}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={current.imageUrl} alt="" className="max-h-full max-w-full object-contain" />
-            </div>
+              <ZoomBadge className="right-3 top-3" />
+            </button>
             <p className="text-xs text-stone-600">
               {current.project.name} · {sourceLabel(current)} · {current.width} x {current.height}px
               {current.sourceText && <> · <i>&ldquo;{current.sourceText.slice(0, 80)}&rdquo;</i></>}
@@ -342,13 +357,19 @@ function QuickReview({ projectId, roomTypes, aiConfigured, onDetails }: { projec
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-600">Up next</p>
             <div className="grid max-h-[70vh] grid-cols-2 gap-2 overflow-auto pr-1">
               {queue.slice(1, 41).map((r) => (
-                <div key={r.id} className="overflow-hidden rounded-xl bg-white ring-1 ring-stone-100">
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => onDetails(r)}
+                  className="group relative overflow-hidden rounded-xl bg-white text-left ring-1 ring-stone-100 hover:ring-bronze"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={r.thumbUrl} alt="" className="block h-24 w-full object-cover" />
+                  <ZoomBadge className="right-1.5 top-1.5 p-1" />
                   <p className="truncate px-2 py-1 text-[11px] text-stone-600">
                     {r.suggestion.likelyNotDesign ? "Small picture" : nameOf(r.suggestion.roomTypeId) || "No suggestion"}
                   </p>
-                </div>
+                </button>
               ))}
             </div>
           </div>

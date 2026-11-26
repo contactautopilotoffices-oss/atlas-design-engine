@@ -7,9 +7,10 @@ import { currentActor } from "@/modules/security/auth";
 export const GET = route(async () => {
   const r = repo();
   const staff = (await currentActor()).kind === "staff";
-  const [roomTypes, offerings, properties, floorPlans, directions, materials, projects, settings] = await Promise.all([
+  const [roomTypes, offerings, boqItems, properties, floorPlans, directions, materials, projects, settings] = await Promise.all([
     r.list("roomTypes"),
     r.list("offerings"),
+    r.list("boqItems"),
     r.list("properties"),
     r.list("floorPlans"),
     r.list("designDirections"),
@@ -19,7 +20,8 @@ export const GET = route(async () => {
   ]);
   return {
     roomTypes: roomTypes.sort((a, b) => a.sortOrder - b.sortOrder),
-    offerings: offerings.sort((a, b) => a.rank - b.rank).map((o) => (staff ? o : { id: o.id, name: o.name, description: o.description, rank: o.rank, isDemo: o.isDemo })),
+    offerings: offerings.sort((a, b) => a.rank - b.rank).map((o) => (staff ? o : { id: o.id, name: o.name, description: o.description, tierGuidance: o.tierGuidance, rank: o.rank, isDemo: o.isDemo })),
+    boqItems: boqItems.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
     properties: staff ? properties : properties.filter((p) => floorPlans.some((f) => f.propertyId === p.id && f.status !== "draft")),
     // Drafts are imported plans still being checked; only staff see them. Older plans saved
     // before drafts existed have no status and count as published.

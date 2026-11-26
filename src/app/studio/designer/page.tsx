@@ -3,12 +3,13 @@ import { Check, FileText, MessageSquare, RotateCcw, Trash2, X } from "lucide-rea
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/components/api";
+import { useLightbox, ZoomBadge } from "@/components/lightbox";
 import type { RoomSummary, SessionSummary } from "@/components/session";
 import { Button, cx, Empty, ErrorNote, inputCls, Pill, Spinner, Swatches } from "@/components/ui";
 
 type QueueItem = { sessionId: string; clientName: string; propertyName: string; createdAt: string; selectedRooms: number; generated: number; awaitingReview: number; approved: number };
 
-function RoomReview({ sessionId, r, onChange }: { sessionId: string; r: RoomSummary; onChange: () => void }) {
+function RoomReview({ sessionId, r, onChange, onZoom }: { sessionId: string; r: RoomSummary; onChange: () => void; onZoom: (img: { src: string; title?: string; subtitle?: string }) => void }) {
   const [comment, setComment] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const act = async (action: string, generatedAssetId: string | null) => {
@@ -37,8 +38,16 @@ function RoomReview({ sessionId, r, onChange }: { sessionId: string; r: RoomSumm
           <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-600">Client&apos;s reference</p>
           {ref ? (
             <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={ref.imageUrl} alt="" className="w-full rounded-xl" />
+              <button
+                type="button"
+                onClick={() => onZoom({ src: ref.imageUrl, title: `${r.room.name} · Client reference`, subtitle: `${ref.referenceCode} · ${ref.project.name}` })}
+                className="group relative block w-full cursor-zoom-in overflow-hidden rounded-xl"
+                aria-label="Enlarge client reference"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={ref.imageUrl} alt="" className="w-full rounded-xl" />
+                <ZoomBadge className="right-2 top-2" />
+              </button>
               <p className="mt-1 text-xs">{ref.referenceCode} · {ref.project.name} · rev {r.selection!.revision}</p>
               <Swatches palette={ref.palette} />
             </>
@@ -54,8 +63,16 @@ function RoomReview({ sessionId, r, onChange }: { sessionId: string; r: RoomSumm
               const job = r.jobs.find((j) => j.id === a.jobId);
               return (
                 <div key={a.id} className={cx("space-y-1.5 rounded-xl p-2", a.reviewStatus === "approved" ? "bg-live-soft" : "bg-stone-50")}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/assets/generated-images/${a.blobKey}`} alt="" className="w-full rounded-lg" />
+                  <button
+                    type="button"
+                    onClick={() => onZoom({ src: `/api/assets/generated-images/${a.blobKey}`, title: `${r.room.name} · Generated concept`, subtitle: job?.modelId })}
+                    className="group relative block w-full cursor-zoom-in overflow-hidden rounded-lg"
+                    aria-label="Enlarge generated concept"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/assets/generated-images/${a.blobKey}`} alt="" className="w-full rounded-lg" />
+                    <ZoomBadge className="right-1.5 top-1.5 p-1" />
+                  </button>
                   <div className="flex flex-wrap items-center gap-1 text-[11px]">
                     <Pill tone={a.reviewStatus === "approved" ? "good" : a.reviewStatus === "rejected" ? "bad" : "warn"}>{a.reviewStatus.replace("_", " ")}</Pill>
                     {a.isHandoffAsset && <Pill tone="good">handoff asset</Pill>}
@@ -106,6 +123,7 @@ function RoomReview({ sessionId, r, onChange }: { sessionId: string; r: RoomSumm
 }
 
 export default function DesignerPage() {
+  const { openLightbox, lightboxNode } = useLightbox();
   const [queue, setQueue] = useState<QueueItem[] | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSummary | null>(null);
@@ -160,12 +178,13 @@ export default function DesignerPage() {
             <>
               <div className="flex justify-end"><Link href={`/handoff/${current}`}><Button variant="secondary" size="sm"><FileText className="size-3.5" /> Handoff summary</Button></Link></div>
               {detail.rooms.filter((r) => r.selection || r.assets.length).map((r) => (
-                <RoomReview key={r.room.id} sessionId={current} r={r} onChange={() => { loadDetail(); loadQueue(); }} />
+                <RoomReview key={r.room.id} sessionId={current} r={r} onZoom={openLightbox} onChange={() => { loadDetail(); loadQueue(); }} />
               ))}
             </>
           )}
         </div>
       </div>
+      {lightboxNode}
     </div>
   );
 }

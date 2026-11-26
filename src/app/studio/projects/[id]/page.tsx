@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, deleteResource } from "@/components/api";
+import { useLightbox, ZoomBadge } from "@/components/lightbox";
 import { Button, cx, ErrorNote, Pill, Spinner } from "@/components/ui";
 import type { Project, ReferenceAsset, SourceDocument } from "@/modules/core/schemas";
 
@@ -54,6 +55,7 @@ export default function ProjectDetail() {
   const [results, setResults] = useState<UploadResult[]>([]);
   const [drag, setDrag] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const { openLightbox, lightboxNode } = useLightbox();
   const load = useCallback(() => api<Detail>(`/api/projects/${id}`).then(setD).catch((e) => setErr(e.message)), [id]);
   useEffect(() => {
     load();
@@ -284,8 +286,16 @@ export default function ProjectDetail() {
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                       {docRefs.map((ref) => (
                         <div key={ref.id} className="group relative overflow-hidden rounded-xl bg-stone-50 ring-1 ring-stone-100">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={ref.thumbUrl} alt={ref.referenceCode} className="block h-24 w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => openLightbox({ src: ref.imageUrl, title: ref.referenceCode, subtitle: ref.roomTypeName ?? d.project.name })}
+                            className="relative block w-full cursor-zoom-in"
+                            aria-label={`Enlarge ${ref.referenceCode}`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ref.thumbUrl} alt={ref.referenceCode} className="block h-24 w-full object-cover" />
+                            <ZoomBadge className="left-1.5 top-1.5 p-1" />
+                          </button>
                           <button
                             aria-label={`Delete ${ref.referenceCode}`}
                             onClick={() => removeReference(ref)}
@@ -320,6 +330,7 @@ export default function ProjectDetail() {
           );
         })}
       </section>
+      {lightboxNode}
     </div>
   );
 }

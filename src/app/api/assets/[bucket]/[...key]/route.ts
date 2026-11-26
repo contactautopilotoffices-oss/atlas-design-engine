@@ -27,9 +27,10 @@ export const GET = route<{ bucket: string; key: string[] }>(async (_req, { bucke
       const hash = await clientTokenHash(false);
       if (!session || !hash || session.ownerTokenHash !== hash) throw forbidden();
     } else if (bucket === "floor-plans") {
-      // The drawing under a published plan is shown to clients; drafts stay staff-only.
+      // The drawing and cached tier previews under a published plan are shown to clients; drafts stay staff-only.
       const plan = await repo().get("floorPlans", key[0]);
-      if (!plan || plan.status === "draft" || plan.background?.key !== path) throw forbidden();
+      const allowed = plan && plan.status !== "draft" && (plan.background?.key === path || (plan.previews ?? []).some((p) => p.blobKey === path));
+      if (!allowed) throw forbidden();
     } else throw forbidden();
   }
   const file = await blobs().get(bucket as BlobBucket, path);

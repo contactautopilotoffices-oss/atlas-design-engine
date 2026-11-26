@@ -3,10 +3,11 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, deleteResource } from "@/components/api";
 import { Button, cx, ErrorNote, Field, inputCls, Pill, Spinner } from "@/components/ui";
-import type { AppSettings, AuditEntry, FloorPlan, Material, Offering, Property, RoomType } from "@/modules/core/schemas";
+import type { AppSettings, AuditEntry, BoqBasis, BoqCategory, BoqItem, FloorPlan, Material, Offering, Property, RoomType } from "@/modules/core/schemas";
+import { BOQ_BASIS_LABELS, BOQ_CATEGORY_LABELS, BOQ_CATEGORY_ORDER } from "@/modules/boq/calculator";
 import { ALL_MODELS } from "@/modules/generation/models";
 
-const TABS = ["Offerings", "Room types", "Materials", "Properties & floor plans", "AI prompt", "Demo content", "Users & permissions", "Audit log"] as const;
+const TABS = ["Offerings", "BOQ & rates", "Room types", "Materials", "Properties & floor plans", "AI prompt", "Demo content", "Users & permissions", "Audit log"] as const;
 const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
 function useItems<T>(collection: string) {
@@ -50,6 +51,9 @@ function OfferingEditor({ o, roomTypes, onSave, onDelete }: { o: Partial<Offerin
         <Field label="Description"><input className={inputCls} value={x.description ?? ""} onChange={(e) => setX({ ...x, description: e.target.value })} /></Field>
         <Field label="Rank"><input type="number" className={inputCls} value={x.rank ?? 0} onChange={(e) => setX({ ...x, rank: Number(e.target.value) })} /></Field>
       </div>
+      <Field label="AI Tier Guidance" hint="Finish and styling instructions sent to the image AI when generating this package tier.">
+        <textarea className={cx(inputCls, "h-16")} value={x.tierGuidance ?? ""} onChange={(e) => setX({ ...x, tierGuidance: e.target.value })} />
+      </Field>
       <div className="grid gap-2 sm:grid-cols-2">
         <Field label="Which references are eligible" hint="Tagged = only references tagged for this offering in review.">
           <select className={inputCls} value={rules.mode} onChange={(e) => setR({ mode: e.target.value as "tagged" | "all-approved" })}>
@@ -123,30 +127,127 @@ function JsonEditor<T extends { id: string }>({ item, onSave, onDelete }: { item
   );
 }
 
+function BoqRowEditor({
+  item,
+  offerings,
+  roomTypes,
+  onSave,
+  onDelete,
+}: {
+  item: Partial<BoqItem>;
+  offerings: Offering[];
+  roomTypes: RoomType[];
+  onSave: (b: Partial<BoqItem>) => void;
+  onDelete?: () => void;
+}) {
+  const [x, setX] = useState<Partial<BoqItem>>({
+    offeringId: offerings[0]?.id ?? "",
+    category: "flooring",
+    unit: "sq ft",
+    basis: "floor_area_sqft",
+    multiplier: 1,
+    unitRate: 0,
+    roomTypeIds: [],
+    sortOrder: 0,
+    ...item,
+  });
+  return (
+    <div className="space-y-2 rounded-2xl bg-white p-3 ring-1 ring-stone-100">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.3fr_1.6fr_0.9fr_1fr_0.7fr_0.7fr_0.9fr]">
+        <Field label="Package tier">
+          <select className={inputCls} value={x.offeringId ?? ""} onChange={(e) => setX({ ...x, offeringId: e.target.value })}>
+            {offerings.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Category">
+          <select className={inputCls} value={x.category ?? "flooring"} onChange={(e) => setX({ ...x, category: e.target.value as BoqCategory })}>
+            {BOQ_CATEGORY_ORDER.map((c) => <option key={c} value={c}>{BOQ_CATEGORY_LABELS[c]}</option>)}
+          </select>
+        </Field>
+        <Field label="Line item name">
+          <input className={inputCls} value={x.name ?? ""} onChange={(e) => setX({ ...x, name: e.target.value })} placeholder="e.g. Flooring Finishes" />
+        </Field>
+        <Field label="Basis">
+          <select className={inputCls} value={x.basis ?? "floor_area_sqft"} onChange={(e) => setX({ ...x, basis: e.target.value as BoqBasis })}>
+            {(Object.keys(BOQ_BASIS_LABELS) as BoqBasis[]).map((b) => <option key={b} value={b}>{BOQ_BASIS_LABELS[b]}</option>)}
+          </select>
+        </Field>
+        <Field label="Unit rate">
+          <input type="number" min={0} className={inputCls} value={x.unitRate ?? 0} onChange={(e) => setX({ ...x, unitRate: Number(e.target.value) })} />
+        </Field>
+        <Field label="Unit">
+          <input className={inputCls} value={x.unit ?? "sq ft"} onChange={(e) => setX({ ...x, unit: e.target.value })} />
+        </Field>
+        <Field label="Multiplier">
+          <input type="number" step="0.05" min={0.01} className={inputCls} value={x.multiplier ?? 1} onChange={(e) => setX({ ...x, multiplier: Number(e.target.value) })} />
+        </Field>
+        <Field label="Sort order">
+          <input type="number" className={inputCls} value={x.sortOrder ?? 0} onChange={(e) => setX({ ...x, sortOrder: Number(e.target.value) })} />
+        </Field>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-[2fr_3fr_auto] lg:items-end">
+        <Field label="Specification">
+          <input className={inputCls} value={x.specification ?? ""} onChange={(e) => setX({ ...x, specification: e.target.value })} placeholder="Material spec & finish detail" />
+        </Field>
+        <div>
+          <p className="mb-1 text-xs font-medium text-stone-600">Apply to room types (none ticked = all rooms)</p>
+          <div className="flex flex-wrap gap-2">
+            {roomTypes.map((rt) => {
+              const ids = x.roomTypeIds ?? [];
+              return (
+                <label key={rt.id} className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={ids.includes(rt.id)}
+                    onChange={(e) => setX({ ...x, roomTypeIds: e.target.checked ? [...ids, rt.id] : ids.filter((i) => i !== rt.id) })}
+                  />
+                  {rt.name}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex gap-1.5">
+          {onDelete && <Button size="sm" variant="ghost" onClick={onDelete} aria-label="Delete"><Trash2 className="size-3.5" /></Button>}
+          <Button size="sm" disabled={!x.name || !x.offeringId} onClick={() => onSave(x)}><Save className="size-3.5" /> Save</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PromptSettings({ s, providers, onSave }: { s: AppSettings; providers?: { higgsfield: { configured: boolean }; openai?: { configured: boolean } }; onSave: (b: Partial<AppSettings>) => void }) {
   const [instr, setInstr] = useState(s.promptInstructions.join("\n"));
   const [neg, setNeg] = useState(s.negativePrompt);
   const [defModel, setDefModel] = useState(s.defaultModelId);
+  const [currency, setCurrency] = useState(s.currency || "INR");
   return (
     <>
       <Field label="Generation instructions (one per line)" hint="Added to every brief after the room, spatial and design sections.">
         <textarea className={cx(inputCls, "h-40")} value={instr} onChange={(e) => setInstr(e.target.value)} />
       </Field>
       <Field label="Negative prompt" hint="Only sent to models that document support for it."><input className={inputCls} value={neg} onChange={(e) => setNeg(e.target.value)} /></Field>
-      <Field label="Default model" hint="Switch between OpenAI and Higgsfield models here. Providers without a configured key fall back automatically if another is configured.">
-        <select className={inputCls} value={defModel} onChange={(e) => setDefModel(e.target.value)}>
-          {ALL_MODELS.map((m) => {
-            const p = m.provider ?? "higgsfield";
-            const ready = p === "openai" ? providers?.openai?.configured : providers?.higgsfield?.configured;
-            return (
-              <option key={m.id} value={m.id}>
-                {m.label}{providers ? (ready ? " (configured)" : " (key not set)") : ""}
-              </option>
-            );
-          })}
-        </select>
-      </Field>
-      <Button onClick={() => onSave({ promptInstructions: instr.split("\n").map((l) => l.trim()).filter(Boolean), negativePrompt: neg, defaultModelId: defModel })}><Save className="size-4" /> Save</Button>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Default model" hint="Switch between OpenAI and Higgsfield models here. Providers without a configured key fall back automatically if another is configured.">
+          <select className={inputCls} value={defModel} onChange={(e) => setDefModel(e.target.value)}>
+            {ALL_MODELS.map((m) => {
+              const p = m.provider ?? "higgsfield";
+              const ready = p === "openai" ? providers?.openai?.configured : providers?.higgsfield?.configured;
+              return (
+                <option key={m.id} value={m.id}>
+                  {m.label}{providers ? (ready ? " (configured)" : " (key not set)") : ""}
+                </option>
+              );
+            })}
+          </select>
+        </Field>
+        <Field label="Default BOQ currency" hint="Used across hover estimates, Room Options BOQ, and CSV exports.">
+          <select className={inputCls} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            {["INR", "USD", "EUR", "GBP", "AED", "SGD"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Button onClick={() => onSave({ promptInstructions: instr.split("\n").map((l) => l.trim()).filter(Boolean), negativePrompt: neg, defaultModelId: defModel, currency })}><Save className="size-4" /> Save</Button>
     </>
   );
 }
@@ -154,11 +255,13 @@ function PromptSettings({ s, providers, onSave }: { s: AppSettings; providers?: 
 export default function AdminPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>(() => (typeof window !== "undefined" && window.location.hash === "#audit" ? "Audit log" : "Offerings"));
   const offerings = useItems<Offering>("offerings");
+  const boqItems = useItems<BoqItem>("boqItems");
   const roomTypes = useItems<RoomType>("roomTypes");
   const materials = useItems<Material>("materials");
   const properties = useItems<Property>("properties");
   const floorPlans = useItems<FloorPlan>("floorPlans");
   const settings = useItems<AppSettings>("settings");
+  const [boqTierFilter, setBoqTierFilter] = useState<string>("all");
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
   const [demoMsg, setDemoMsg] = useState<string | null>(null);
   const [newMat, setNewMat] = useState({ name: "", category: "" });
@@ -169,13 +272,13 @@ export default function AdminPage() {
   }, [tab]);
   const s = settings.items?.[0];
 
-  const errors = [offerings.err, roomTypes.err, materials.err, properties.err, floorPlans.err, settings.err].filter(Boolean)[0] ?? null;
+  const errors = [offerings.err, boqItems.err, roomTypes.err, materials.err, properties.err, floorPlans.err, settings.err].filter(Boolean)[0] ?? null;
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-3xl">Administration</h1>
-        <p className="text-sm text-stone-600">Business rules and configuration. Nothing here is hardcoded in the app.</p>
+        <p className="text-sm text-stone-600">Business rules, package tiers, BOQ rate cards and configuration. Nothing here is hardcoded in the app.</p>
       </div>
       <div className="flex flex-wrap gap-1">
         {TABS.map((t) => (
@@ -186,11 +289,41 @@ export default function AdminPage() {
 
       {tab === "Offerings" && (
         <div className="space-y-3">
-          <p className="text-sm text-stone-600">An offering decides which references, room types and materials a client can choose from.</p>
+          <p className="text-sm text-stone-600">Each offering tier (e.g. Economy, Premium Economy) defines reference eligibility rules and AI styling guidance.</p>
           {!offerings.items || !roomTypes.items ? <Spinner /> : offerings.items.sort((a, b) => a.rank - b.rank).map((o) => (
             <OfferingEditor key={o.id + o.updatedAt} o={o} roomTypes={roomTypes.items!} onSave={(b) => offerings.save(o.id, b)} onDelete={() => offerings.remove(o.id)} />
           ))}
-          {roomTypes.items && <details className="rounded-2xl bg-stone-50 p-3"><summary className="cursor-pointer text-sm font-medium"><Plus className="inline size-4" /> New offering</summary><div className="mt-3"><OfferingEditor o={{ name: "", description: "", rank: (offerings.items?.length ?? 0) + 1 }} roomTypes={roomTypes.items} onSave={(b) => offerings.save(null, b)} /></div></details>}
+          {roomTypes.items && <details className="rounded-2xl bg-stone-50 p-3"><summary className="cursor-pointer text-sm font-medium"><Plus className="inline size-4" /> New offering</summary><div className="mt-3"><OfferingEditor o={{ name: "", description: "", tierGuidance: "", rank: (offerings.items?.length ?? 0) + 1 }} roomTypes={roomTypes.items} onSave={(b) => offerings.save(null, b)} /></div></details>}
+        </div>
+      )}
+
+      {tab === "BOQ & rates" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-stone-600">Configure deterministic rate cards ({s?.currency ?? "INR"}) per tier. Quantities are calculated automatically from room floor area, wall area, and seating.</p>
+            <select className={cx(inputCls, "w-auto")} value={boqTierFilter} onChange={(e) => setBoqTierFilter(e.target.value)}>
+              <option value="all">All tiers</option>
+              {(offerings.items ?? []).sort((a, b) => a.rank - b.rank).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          {!boqItems.items || !offerings.items || !roomTypes.items ? <Spinner /> : (
+            <>
+              <div className="space-y-2">
+                {boqItems.items
+                  .filter((b) => boqTierFilter === "all" || b.offeringId === boqTierFilter)
+                  .sort((a, b) => a.offeringId.localeCompare(b.offeringId) || a.sortOrder - b.sortOrder)
+                  .map((b) => (
+                    <BoqRowEditor key={b.id + b.updatedAt} item={b} offerings={offerings.items!} roomTypes={roomTypes.items!} onSave={(body) => boqItems.save(b.id, body)} onDelete={() => boqItems.remove(b.id)} />
+                  ))}
+              </div>
+              <details className="rounded-2xl bg-stone-50 p-3">
+                <summary className="cursor-pointer text-sm font-medium"><Plus className="inline size-4" /> Add BOQ rate line</summary>
+                <div className="mt-3">
+                  <BoqRowEditor item={{ offeringId: boqTierFilter !== "all" ? boqTierFilter : offerings.items[0]?.id }} offerings={offerings.items} roomTypes={roomTypes.items} onSave={(body) => boqItems.save(null, body)} />
+                </div>
+              </details>
+            </>
+          )}
         </div>
       )}
 

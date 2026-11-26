@@ -16,10 +16,29 @@ const ROLE_TEXT: Record<ReferenceRole, string> = {
 
 export type BuiltPrompt = { prompt: string; negativePrompt: string; sections: Record<string, string> };
 
-export function buildPrompt(brief: DesignBrief, opts: { instructions: string[]; negativePrompt: string; imageInputs: number }): BuiltPrompt {
+export type TierPromptContext = {
+  name: string;
+  description?: string;
+  tierGuidance?: string;
+  materials?: string[];
+};
+
+export function buildPrompt(
+  brief: DesignBrief,
+  opts: { instructions: string[]; negativePrompt: string; imageInputs: number; tier?: TierPromptContext | null },
+): BuiltPrompt {
   const d = brief.dimensions;
   const unit = d.unit;
   const list = (xs: string[]) => (xs.length ? xs.join("; ") : "none specified");
+  const tierText = opts.tier
+    ? [
+        `Target finish package tier: ${opts.tier.name}.`,
+        opts.tier.tierGuidance || opts.tier.description || "",
+        opts.tier.materials?.length ? `BOQ finish & fixture specification for this tier: ${opts.tier.materials.join("; ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
   const sections: Record<string, string> = {
     project: [
       `Design a ${brief.roomTypeName}.`,
@@ -47,6 +66,7 @@ export function buildPrompt(brief: DesignBrief, opts: { instructions: string[]; 
     ]
       .filter(Boolean)
       .join(" "),
+    ...(tierText ? { tier: tierText } : {}),
     references:
       opts.imageInputs > 0
         ? brief.references
@@ -58,6 +78,6 @@ export function buildPrompt(brief: DesignBrief, opts: { instructions: string[]; 
           : "",
     instructions: opts.instructions.join(" "),
   };
-  const prompt = [sections.project, sections.spatial, sections.design, sections.references, sections.instructions].filter(Boolean).join("\n\n");
+  const prompt = [sections.project, sections.spatial, sections.design, sections.tier, sections.references, sections.instructions].filter(Boolean).join("\n\n");
   return { prompt, negativePrompt: opts.negativePrompt, sections };
 }
